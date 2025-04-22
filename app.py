@@ -4,6 +4,7 @@ import re
 import json
 import io
 import os
+import requests
 from together import Together
 
 # Page configuration
@@ -37,18 +38,35 @@ st.markdown("""
 if 'api_key' not in st.session_state:
     st.session_state.api_key = os.environ.get("TOGETHER_API_KEY", "")
 
-# Initialize Together client
-@st.cache_resource
-def get_together_client(api_key):
+# Call Together API directly
+def call_together_api(api_key, model, prompt, temperature=0.3, max_tokens=2000):
     if not api_key:
-        st.warning("Please enter a Together API key.")
+        st.error("API key is required")
         return None
+        
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
     
-    # Create Together client with the correct initialization
-    # The Together client now expects the API key to be set by an environment variable
-    # or through a different mechanism
-    os.environ["TOGETHER_API_KEY"] = api_key
-    return Together()  # No arguments in constructor
+    data = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
+    
+    try:
+        response = requests.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers=headers,
+            json=data
+        )
+        response.raise_for_status()  # Raise exception for HTTP errors
+        return response.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {str(e)}")
+        return None
 
 # Load examples from JSON file
 @st.cache_data
@@ -257,7 +275,6 @@ def main():
         temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.1)
         max_tokens = st.slider("Max Tokens", 500, 4000, 2000, 100)
     
-    client = get_together_client(st.session_state.api_key)
     examples = load_examples()
     examples_str = format_examples(examples)
     
@@ -274,49 +291,50 @@ def main():
                 st.success("CSV file successfully loaded!")
                 st.dataframe(csv_data)
                 
-                if st.button("Process CSV File") and client:
-                    with st.spinner("Processing family relationships..."):
-                        try:
-                            # Convert to CSV string
-                            csv_string = csv_data.to_csv(index=False)
-                            
-                            # Create full prompt
-                            full_prompt = get_cot_prompt(examples_str, csv_string)
-                            
-                            # Call API
-                            response = client.chat.completions.create(
-                                model=model,
-                                messages=[{
-                                    "role": "user",
-                                    "content": full_prompt
-                                }],
-                                temperature=temperature,
-                                max_tokens=max_tokens
-                            )
-                            result = response.choices[0].message.content
-                            
-                            # Parse response
-                            reasoning, table_data = parse_response(result)
-                            
-                            # Display results
-                            st.markdown('<div class="output-container">', unsafe_allow_html=True)
-                            
-                            st.markdown("### Reasoning Steps")
-                            st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
-                            for line in reasoning:
-                                st.markdown(line)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                            st.markdown("### Final Output Table")
-                            if len(table_data) > 1:  # Check if we have data beyond the header
-                                df = pd.DataFrame(table_data[1:], columns=table_data[0])
-                                st.table(df)
-                            else:
-                                st.warning("No table data was generated")
-                            
-                            st.markdown('</div>', unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"API Error: {str(e)}")
+                if st.button("Process CSV File"):
+                    if not st.session_state.api_key:
+                        st.error("Please enter a Together API key in the sidebar")
+                    else:
+                        with st.spinner("Processing family relationships..."):
+                            try:
+                                # Convert to CSV string
+                                csv_string = csv_data.to_csv(index=False)
+                                
+                                # Create full prompt
+                                full_prompt = get_cot_prompt(examples_str, csv_string)
+                                
+                                # Call API directly
+                                result = call_together_api(
+                                    st.session_state.api_key,
+                                    model,
+                                    full_prompt,
+                                    temperature,
+                                    max_tokens
+                                )
+                                
+                                if result:
+                                    # Parse response
+                                    reasoning, table_data = parse_response(result)
+                                    
+                                    # Display results
+                                    st.markdown('<div class="output-container">', unsafe_allow_html=True)
+                                    
+                                    st.markdown("### Reasoning Steps")
+                                    st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
+                                    for line in reasoning:
+                                        st.markdown(line)
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                                    
+                                    st.markdown("### Final Output Table")
+                                    if len(table_data) > 1:  # Check if we have data beyond the header
+                                        df = pd.DataFrame(table_data[1:], columns=table_data[0])
+                                        st.table(df)
+                                    else:
+                                        st.warning("No table data was generated")
+                                    
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"API Error: {str(e)}")
             except Exception as e:
                 st.error(f"Error processing CSV: {str(e)}")
     
@@ -329,54 +347,55 @@ def main():
         )
         
         if text_input:
-            if st.button("Process Text Input") and client:
-                with st.spinner("Processing family relationships..."):
-                    try:
-                        # Try to parse the text input as CSV
-                        csv_data = parse_csv_text(text_input)
-                        st.success("Text data successfully parsed!")
-                        st.dataframe(csv_data)
-                        
-                        # Convert to CSV string
-                        csv_string = csv_data.to_csv(index=False)
-                        
-                        # Create full prompt
-                        full_prompt = get_cot_prompt(examples_str, csv_string)
-                        
-                        # Call API
-                        response = client.chat.completions.create(
-                            model=model,
-                            messages=[{
-                                "role": "user",
-                                "content": full_prompt
-                            }],
-                            temperature=temperature,
-                            max_tokens=max_tokens
-                        )
-                        result = response.choices[0].message.content
-                        
-                        # Parse response
-                        reasoning, table_data = parse_response(result)
-                        
-                        # Display results
-                        st.markdown('<div class="output-container">', unsafe_allow_html=True)
-                        
-                        st.markdown("### Reasoning Steps")
-                        st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
-                        for line in reasoning:
-                            st.markdown(line)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        
-                        st.markdown("### Final Output Table")
-                        if len(table_data) > 1:  # Check if we have data beyond the header
-                            df = pd.DataFrame(table_data[1:], columns=table_data[0])
-                            st.table(df)
-                        else:
-                            st.warning("No table data was generated")
-                        
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"Processing error: {e}")
+            if st.button("Process Text Input"):
+                if not st.session_state.api_key:
+                    st.error("Please enter a Together API key in the sidebar")
+                else:
+                    with st.spinner("Processing family relationships..."):
+                        try:
+                            # Try to parse the text input as CSV
+                            csv_data = parse_csv_text(text_input)
+                            st.success("Text data successfully parsed!")
+                            st.dataframe(csv_data)
+                            
+                            # Convert to CSV string
+                            csv_string = csv_data.to_csv(index=False)
+                            
+                            # Create full prompt
+                            full_prompt = get_cot_prompt(examples_str, csv_string)
+                            
+                            # Call API directly
+                            result = call_together_api(
+                                st.session_state.api_key,
+                                model,
+                                full_prompt,
+                                temperature,
+                                max_tokens
+                            )
+                            
+                            if result:
+                                # Parse response
+                                reasoning, table_data = parse_response(result)
+                                
+                                # Display results
+                                st.markdown('<div class="output-container">', unsafe_allow_html=True)
+                                
+                                st.markdown("### Reasoning Steps")
+                                st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
+                                for line in reasoning:
+                                    st.markdown(line)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                st.markdown("### Final Output Table")
+                                if len(table_data) > 1:  # Check if we have data beyond the header
+                                    df = pd.DataFrame(table_data[1:], columns=table_data[0])
+                                    st.table(df)
+                                else:
+                                    st.warning("No table data was generated")
+                                
+                                st.markdown('</div>', unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"Processing error: {e}")
 
 if __name__ == "__main__":
     main()
