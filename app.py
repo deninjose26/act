@@ -5,7 +5,20 @@ import json
 import io
 import os
 import requests
+import importlib
 from together import Together
+
+# Check for required dependencies
+def check_dependencies():
+    missing_deps = []
+    
+    # Check for openpyxl (required for Excel reading/writing)
+    try:
+        importlib.import_module('openpyxl')
+    except ImportError:
+        missing_deps.append('openpyxl')
+    
+    return missing_deps
 
 # Page configuration
 st.set_page_config(page_title="Family Relationship Analyzer", layout="wide")
@@ -31,12 +44,29 @@ st.markdown("""
     .reasoning-section {
         margin-bottom: 20px;
     }
+    .dependency-warning {
+        background-color: #ffebee;
+        color: #c62828;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    .dependency-command {
+        background-color: #f5f5f5;
+        padding: 8px;
+        font-family: monospace;
+        border-radius: 3px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Initialize session state for API key
 if 'api_key' not in st.session_state:
     st.session_state.api_key = os.environ.get("TOGETHER_API_KEY", "")
+
+# Check dependencies
+missing_dependencies = check_dependencies()
+excel_support_available = 'openpyxl' not in missing_dependencies
 
 # Call Together API directly
 def call_together_api(api_key, model, prompt, temperature=0.3, max_tokens=2000):
@@ -251,9 +281,43 @@ def parse_response(result):
     
     return reasoning, table_data
 
+# Function to read Excel file if openpyxl is available
+def read_excel_file(file, sheet_name=None):
+    if not excel_support_available:
+        st.error("Cannot read Excel file: missing openpyxl dependency")
+        st.markdown(
+            '<div class="dependency-warning">'
+            'Excel support requires the openpyxl package. Please install it using:<br>'
+            '<span class="dependency-command">pip install openpyxl</span><br>'
+            'Then restart the application.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+        return None
+    
+    try:
+        if sheet_name:
+            return pd.read_excel(file, sheet_name=sheet_name)
+        else:
+            return pd.read_excel(file)
+    except Exception as e:
+        st.error(f"Error reading Excel file: {str(e)}")
+        return None
+
 # Main app function
 def main():
     st.markdown('<h1 class="title">Family Relationship Analyzer</h1>', unsafe_allow_html=True)
+    
+    # Display dependency warnings at the top if needed
+    if missing_dependencies:
+        st.markdown(
+            '<div class="dependency-warning">'
+            f'Missing dependencies: {", ".join(missing_dependencies)}<br>'
+            'To enable full functionality, please install the missing packages:<br>'
+            f'<span class="dependency-command">pip install {" ".join(missing_dependencies)}</span>'
+            '</div>',
+            unsafe_allow_html=True
+        )
     
     # Sidebar for API key input
     with st.sidebar:
@@ -279,100 +343,109 @@ def main():
     examples_str = format_examples(examples)
     
     # Create tabs for different input methods
-    tab1, tab2, tab3 = st.tabs(["Excel File Upload", "CSV File Upload", "Text Input"])
+    tabs = []
+    if excel_support_available:
+        tabs = st.tabs(["Excel File Upload", "CSV File Upload", "Text Input"])
+    else:
+        tabs = st.tabs(["CSV File Upload", "Text Input"])
     
-    with tab1:
-        st.markdown('<h2 class="subheader">Upload Family Data Excel File</h2>', unsafe_allow_html=True)
-        uploaded_excel = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"], key="excel_uploader")
-        
-        if uploaded_excel is not None:
-            try:
-                # Check if the file contains multiple sheets
-                xl = pd.ExcelFile(uploaded_excel)
-                sheet_names = xl.sheet_names
-                
-                if len(sheet_names) > 1:
-                    selected_sheet = st.selectbox("Select a sheet:", sheet_names)
-                    excel_data = pd.read_excel(uploaded_excel, sheet_name=selected_sheet)
-                else:
-                    excel_data = pd.read_excel(uploaded_excel)
-                
-                st.success("Excel file successfully loaded!")
-                st.dataframe(excel_data)
-                
-                if st.button("Process Excel File", key="process_excel"):
-                    if not st.session_state.api_key:
-                        st.error("Please enter a Together API key in the sidebar")
+    # Excel tab - only show if openpyxl is available
+    if excel_support_available:
+        with tabs[0]:
+            st.markdown('<h2 class="subheader">Upload Family Data Excel File</h2>', unsafe_allow_html=True)
+            uploaded_excel = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"], key="excel_uploader")
+            
+            if uploaded_excel is not None:
+                try:
+                    # Check if the file contains multiple sheets
+                    xl = pd.ExcelFile(uploaded_excel)
+                    sheet_names = xl.sheet_names
+                    
+                    if len(sheet_names) > 1:
+                        selected_sheet = st.selectbox("Select a sheet:", sheet_names)
+                        excel_data = read_excel_file(uploaded_excel, sheet_name=selected_sheet)
                     else:
-                        with st.spinner("Processing family relationships..."):
-                            try:
-                                # Convert to CSV string for processing
-                                csv_string = excel_data.to_csv(index=False)
-                                
-                                # Create full prompt
-                                full_prompt = get_cot_prompt(examples_str, csv_string)
-                                
-                                # Call API directly
-                                result = call_together_api(
-                                    st.session_state.api_key,
-                                    model,
-                                    full_prompt,
-                                    temperature,
-                                    max_tokens
-                                )
-                                
-                                if result:
-                                    # Parse response
-                                    reasoning, table_data = parse_response(result)
-                                    
-                                    # Display results
-                                    st.markdown('<div class="output-container">', unsafe_allow_html=True)
-                                    
-                                    st.markdown("### Reasoning Steps")
-                                    st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
-                                    for line in reasoning:
-                                        st.markdown(line)
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                                    
-                                    st.markdown("### Final Output Table")
-                                    if len(table_data) > 1:  # Check if we have data beyond the header
-                                        df = pd.DataFrame(table_data[1:], columns=table_data[0])
-                                        st.table(df)
+                        excel_data = read_excel_file(uploaded_excel)
+                    
+                    if excel_data is not None:
+                        st.success("Excel file successfully loaded!")
+                        st.dataframe(excel_data)
+                        
+                        if st.button("Process Excel File", key="process_excel"):
+                            if not st.session_state.api_key:
+                                st.error("Please enter a Together API key in the sidebar")
+                            else:
+                                with st.spinner("Processing family relationships..."):
+                                    try:
+                                        # Convert to CSV string for processing
+                                        csv_string = excel_data.to_csv(index=False)
                                         
-                                        # Add a download button for the processed data as CSV
-                                        csv_buffer = io.StringIO()
-                                        df.to_csv(csv_buffer, index=False)
-                                        st.download_button(
-                                            label="Download processed data as CSV",
-                                            data=csv_buffer.getvalue(),
-                                            file_name="processed_family_data.csv",
-                                            mime="text/csv"
+                                        # Create full prompt
+                                        full_prompt = get_cot_prompt(examples_str, csv_string)
+                                        
+                                        # Call API directly
+                                        result = call_together_api(
+                                            st.session_state.api_key,
+                                            model,
+                                            full_prompt,
+                                            temperature,
+                                            max_tokens
                                         )
                                         
-                                        # Also export to Excel without xlsxwriter
-                                        try:
-                                            excel_buffer = io.BytesIO()
-                                            df.to_excel(excel_buffer, index=False)
-                                            excel_buffer.seek(0)  # Reset the buffer position
+                                        if result:
+                                            # Parse response
+                                            reasoning, table_data = parse_response(result)
                                             
-                                            st.download_button(
-                                                label="Download processed data as Excel",
-                                                data=excel_buffer.getvalue(),
-                                                file_name="processed_family_data.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                            )
-                                        except Exception as e:
-                                            st.warning(f"Excel export not available: {str(e)}")
-                                    else:
-                                        st.warning("No table data was generated")
-                                    
-                                    st.markdown('</div>', unsafe_allow_html=True)
-                            except Exception as e:
-                                st.error(f"API Error: {str(e)}")
-            except Exception as e:
-                st.error(f"Error processing Excel file: {str(e)}")
+                                            # Display results
+                                            st.markdown('<div class="output-container">', unsafe_allow_html=True)
+                                            
+                                            st.markdown("### Reasoning Steps")
+                                            st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
+                                            for line in reasoning:
+                                                st.markdown(line)
+                                            st.markdown('</div>', unsafe_allow_html=True)
+                                            
+                                            st.markdown("### Final Output Table")
+                                            if len(table_data) > 1:  # Check if we have data beyond the header
+                                                df = pd.DataFrame(table_data[1:], columns=table_data[0])
+                                                st.table(df)
+                                                
+                                                # Add a download button for the processed data as CSV
+                                                csv_buffer = io.StringIO()
+                                                df.to_csv(csv_buffer, index=False)
+                                                st.download_button(
+                                                    label="Download processed data as CSV",
+                                                    data=csv_buffer.getvalue(),
+                                                    file_name="processed_family_data.csv",
+                                                    mime="text/csv"
+                                                )
+                                                
+                                                # Also export to Excel if openpyxl is available
+                                                if excel_support_available:
+                                                    try:
+                                                        excel_buffer = io.BytesIO()
+                                                        df.to_excel(excel_buffer, index=False)
+                                                        excel_buffer.seek(0)  # Reset the buffer position
+                                                        
+                                                        st.download_button(
+                                                            label="Download processed data as Excel",
+                                                            data=excel_buffer.getvalue(),
+                                                            file_name="processed_family_data.xlsx",
+                                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                        )
+                                                    except Exception as e:
+                                                        st.warning(f"Excel export error: {str(e)}")
+                                            else:
+                                                st.warning("No table data was generated")
+                                            
+                                            st.markdown('</div>', unsafe_allow_html=True)
+                                    except Exception as e:
+                                        st.error(f"API Error: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error processing Excel file: {str(e)}")
     
-    with tab2:
+    # CSV tab
+    with tabs[0 if not excel_support_available else 1]:
         st.markdown('<h2 class="subheader">Upload Family Data CSV</h2>', unsafe_allow_html=True)
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="csv_uploader")
         
@@ -431,20 +504,21 @@ def main():
                                             mime="text/csv"
                                         )
                                         
-                                        # Try to export as Excel without xlsxwriter
-                                        try:
-                                            excel_buffer = io.BytesIO()
-                                            df.to_excel(excel_buffer, index=False)
-                                            excel_buffer.seek(0)  # Reset the buffer position
-                                            
-                                            st.download_button(
-                                                label="Download processed data as Excel",
-                                                data=excel_buffer.getvalue(),
-                                                file_name="processed_family_data.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                            )
-                                        except Exception as e:
-                                            st.warning(f"Excel export not available: {str(e)}")
+                                        # Try to export as Excel if openpyxl is available
+                                        if excel_support_available:
+                                            try:
+                                                excel_buffer = io.BytesIO()
+                                                df.to_excel(excel_buffer, index=False)
+                                                excel_buffer.seek(0)  # Reset the buffer position
+                                                
+                                                st.download_button(
+                                                    label="Download processed data as Excel",
+                                                    data=excel_buffer.getvalue(),
+                                                    file_name="processed_family_data.xlsx",
+                                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                )
+                                            except Exception as e:
+                                                st.warning(f"Excel export error: {str(e)}")
                                     else:
                                         st.warning("No table data was generated")
                                     
@@ -454,7 +528,8 @@ def main():
             except Exception as e:
                 st.error(f"Error processing CSV: {str(e)}")
     
-    with tab3:
+    # Text input tab
+    with tabs[1 if not excel_support_available else 2]:
         st.markdown('<h2 class="subheader">Enter Family Data as Text</h2>', unsafe_allow_html=True)
         text_input = st.text_area(
             "Enter family relationship data (in either CSV format or as text)",
@@ -517,20 +592,21 @@ def main():
                                         mime="text/csv"
                                     )
                                     
-                                    # Try to export as Excel without xlsxwriter
-                                    try:
-                                        excel_buffer = io.BytesIO()
-                                        df.to_excel(excel_buffer, index=False)
-                                        excel_buffer.seek(0)  # Reset the buffer position
-                                        
-                                        st.download_button(
-                                            label="Download processed data as Excel",
-                                            data=excel_buffer.getvalue(),
-                                            file_name="processed_family_data.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                        )
-                                    except Exception as e:
-                                        st.warning(f"Excel export not available: {str(e)}")
+                                    # Try to export as Excel if openpyxl is available
+                                    if excel_support_available:
+                                        try:
+                                            excel_buffer = io.BytesIO()
+                                            df.to_excel(excel_buffer, index=False)
+                                            excel_buffer.seek(0)  # Reset the buffer position
+                                            
+                                            st.download_button(
+                                                label="Download processed data as Excel",
+                                                data=excel_buffer.getvalue(),
+                                                file_name="processed_family_data.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            )
+                                        except Exception as e:
+                                            st.warning(f"Excel export error: {str(e)}")
                                 else:
                                     st.warning("No table data was generated")
                                 
