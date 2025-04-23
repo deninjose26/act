@@ -339,17 +339,30 @@ def main():
                                         df = pd.DataFrame(table_data[1:], columns=table_data[0])
                                         st.table(df)
                                         
-                                        # Add a download button for the processed data
-                                        buffer = io.BytesIO()
-                                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                                            df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
-                                        
+                                        # Add a download button for the processed data as CSV
+                                        csv_buffer = io.StringIO()
+                                        df.to_csv(csv_buffer, index=False)
                                         st.download_button(
-                                            label="Download processed data as Excel",
-                                            data=buffer.getvalue(),
-                                            file_name="processed_family_data.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            label="Download processed data as CSV",
+                                            data=csv_buffer.getvalue(),
+                                            file_name="processed_family_data.csv",
+                                            mime="text/csv"
                                         )
+                                        
+                                        # Also export to Excel without xlsxwriter
+                                        try:
+                                            excel_buffer = io.BytesIO()
+                                            df.to_excel(excel_buffer, index=False)
+                                            excel_buffer.seek(0)  # Reset the buffer position
+                                            
+                                            st.download_button(
+                                                label="Download processed data as Excel",
+                                                data=excel_buffer.getvalue(),
+                                                file_name="processed_family_data.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            )
+                                        except Exception as e:
+                                            st.warning(f"Excel export not available: {str(e)}")
                                     else:
                                         st.warning("No table data was generated")
                                     
@@ -408,10 +421,9 @@ def main():
                                         df = pd.DataFrame(table_data[1:], columns=table_data[0])
                                         st.table(df)
                                         
-                                        # Add download buttons
+                                        # Add download button for CSV
                                         csv_buffer = io.StringIO()
                                         df.to_csv(csv_buffer, index=False)
-                                        
                                         st.download_button(
                                             label="Download processed data as CSV",
                                             data=csv_buffer.getvalue(),
@@ -419,16 +431,20 @@ def main():
                                             mime="text/csv"
                                         )
                                         
-                                        excel_buffer = io.BytesIO()
-                                        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                                            df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
-                                        
-                                        st.download_button(
-                                            label="Download processed data as Excel",
-                                            data=excel_buffer.getvalue(),
-                                            file_name="processed_family_data.xlsx",
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                        )
+                                        # Try to export as Excel without xlsxwriter
+                                        try:
+                                            excel_buffer = io.BytesIO()
+                                            df.to_excel(excel_buffer, index=False)
+                                            excel_buffer.seek(0)  # Reset the buffer position
+                                            
+                                            st.download_button(
+                                                label="Download processed data as Excel",
+                                                data=excel_buffer.getvalue(),
+                                                file_name="processed_family_data.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                            )
+                                        except Exception as e:
+                                            st.warning(f"Excel export not available: {str(e)}")
                                     else:
                                         st.warning("No table data was generated")
                                     
@@ -491,10 +507,9 @@ def main():
                                     df = pd.DataFrame(table_data[1:], columns=table_data[0])
                                     st.table(df)
                                     
-                                    # Add download buttons
+                                    # Add download button for CSV
                                     csv_buffer = io.StringIO()
                                     df.to_csv(csv_buffer, index=False)
-                                    
                                     st.download_button(
                                         label="Download processed data as CSV",
                                         data=csv_buffer.getvalue(),
@@ -502,16 +517,20 @@ def main():
                                         mime="text/csv"
                                     )
                                     
-                                    excel_buffer = io.BytesIO()
-                                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                                        df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
-                                    
-                                    st.download_button(
-                                        label="Download processed data as Excel",
-                                        data=excel_buffer.getvalue(),
-                                        file_name="processed_family_data.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                    )
+                                    # Try to export as Excel without xlsxwriter
+                                    try:
+                                        excel_buffer = io.BytesIO()
+                                        df.to_excel(excel_buffer, index=False)
+                                        excel_buffer.seek(0)  # Reset the buffer position
+                                        
+                                        st.download_button(
+                                            label="Download processed data as Excel",
+                                            data=excel_buffer.getvalue(),
+                                            file_name="processed_family_data.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
+                                    except Exception as e:
+                                        st.warning(f"Excel export not available: {str(e)}")
                                 else:
                                     st.warning("No table data was generated")
                                 
