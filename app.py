@@ -279,11 +279,89 @@ def main():
     examples_str = format_examples(examples)
     
     # Create tabs for different input methods
-    tab1, tab2 = st.tabs(["CSV File Upload", "Text Input"])
+    tab1, tab2, tab3 = st.tabs(["Excel File Upload", "CSV File Upload", "Text Input"])
     
     with tab1:
+        st.markdown('<h2 class="subheader">Upload Family Data Excel File</h2>', unsafe_allow_html=True)
+        uploaded_excel = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"], key="excel_uploader")
+        
+        if uploaded_excel is not None:
+            try:
+                # Check if the file contains multiple sheets
+                xl = pd.ExcelFile(uploaded_excel)
+                sheet_names = xl.sheet_names
+                
+                if len(sheet_names) > 1:
+                    selected_sheet = st.selectbox("Select a sheet:", sheet_names)
+                    excel_data = pd.read_excel(uploaded_excel, sheet_name=selected_sheet)
+                else:
+                    excel_data = pd.read_excel(uploaded_excel)
+                
+                st.success("Excel file successfully loaded!")
+                st.dataframe(excel_data)
+                
+                if st.button("Process Excel File", key="process_excel"):
+                    if not st.session_state.api_key:
+                        st.error("Please enter a Together API key in the sidebar")
+                    else:
+                        with st.spinner("Processing family relationships..."):
+                            try:
+                                # Convert to CSV string for processing
+                                csv_string = excel_data.to_csv(index=False)
+                                
+                                # Create full prompt
+                                full_prompt = get_cot_prompt(examples_str, csv_string)
+                                
+                                # Call API directly
+                                result = call_together_api(
+                                    st.session_state.api_key,
+                                    model,
+                                    full_prompt,
+                                    temperature,
+                                    max_tokens
+                                )
+                                
+                                if result:
+                                    # Parse response
+                                    reasoning, table_data = parse_response(result)
+                                    
+                                    # Display results
+                                    st.markdown('<div class="output-container">', unsafe_allow_html=True)
+                                    
+                                    st.markdown("### Reasoning Steps")
+                                    st.markdown('<div class="reasoning-section">', unsafe_allow_html=True)
+                                    for line in reasoning:
+                                        st.markdown(line)
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                                    
+                                    st.markdown("### Final Output Table")
+                                    if len(table_data) > 1:  # Check if we have data beyond the header
+                                        df = pd.DataFrame(table_data[1:], columns=table_data[0])
+                                        st.table(df)
+                                        
+                                        # Add a download button for the processed data
+                                        buffer = io.BytesIO()
+                                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                            df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
+                                        
+                                        st.download_button(
+                                            label="Download processed data as Excel",
+                                            data=buffer.getvalue(),
+                                            file_name="processed_family_data.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
+                                    else:
+                                        st.warning("No table data was generated")
+                                    
+                                    st.markdown('</div>', unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"API Error: {str(e)}")
+            except Exception as e:
+                st.error(f"Error processing Excel file: {str(e)}")
+    
+    with tab2:
         st.markdown('<h2 class="subheader">Upload Family Data CSV</h2>', unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="csv_uploader")
         
         if uploaded_file is not None:
             try:
@@ -291,7 +369,7 @@ def main():
                 st.success("CSV file successfully loaded!")
                 st.dataframe(csv_data)
                 
-                if st.button("Process CSV File"):
+                if st.button("Process CSV File", key="process_csv"):
                     if not st.session_state.api_key:
                         st.error("Please enter a Together API key in the sidebar")
                     else:
@@ -329,6 +407,28 @@ def main():
                                     if len(table_data) > 1:  # Check if we have data beyond the header
                                         df = pd.DataFrame(table_data[1:], columns=table_data[0])
                                         st.table(df)
+                                        
+                                        # Add download buttons
+                                        csv_buffer = io.StringIO()
+                                        df.to_csv(csv_buffer, index=False)
+                                        
+                                        st.download_button(
+                                            label="Download processed data as CSV",
+                                            data=csv_buffer.getvalue(),
+                                            file_name="processed_family_data.csv",
+                                            mime="text/csv"
+                                        )
+                                        
+                                        excel_buffer = io.BytesIO()
+                                        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                                            df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
+                                        
+                                        st.download_button(
+                                            label="Download processed data as Excel",
+                                            data=excel_buffer.getvalue(),
+                                            file_name="processed_family_data.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                        )
                                     else:
                                         st.warning("No table data was generated")
                                     
@@ -338,7 +438,7 @@ def main():
             except Exception as e:
                 st.error(f"Error processing CSV: {str(e)}")
     
-    with tab2:
+    with tab3:
         st.markdown('<h2 class="subheader">Enter Family Data as Text</h2>', unsafe_allow_html=True)
         text_input = st.text_area(
             "Enter family relationship data (in either CSV format or as text)",
@@ -347,7 +447,7 @@ def main():
         )
         
         if text_input:
-            if st.button("Process Text Input"):
+            if st.button("Process Text Input", key="process_text"):
                 if not st.session_state.api_key:
                     st.error("Please enter a Together API key in the sidebar")
                 else:
@@ -390,6 +490,28 @@ def main():
                                 if len(table_data) > 1:  # Check if we have data beyond the header
                                     df = pd.DataFrame(table_data[1:], columns=table_data[0])
                                     st.table(df)
+                                    
+                                    # Add download buttons
+                                    csv_buffer = io.StringIO()
+                                    df.to_csv(csv_buffer, index=False)
+                                    
+                                    st.download_button(
+                                        label="Download processed data as CSV",
+                                        data=csv_buffer.getvalue(),
+                                        file_name="processed_family_data.csv",
+                                        mime="text/csv"
+                                    )
+                                    
+                                    excel_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                                        df.to_excel(writer, sheet_name='Processed_Family_Data', index=False)
+                                    
+                                    st.download_button(
+                                        label="Download processed data as Excel",
+                                        data=excel_buffer.getvalue(),
+                                        file_name="processed_family_data.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
                                 else:
                                     st.warning("No table data was generated")
                                 
